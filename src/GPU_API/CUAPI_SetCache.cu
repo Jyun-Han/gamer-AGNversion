@@ -18,7 +18,7 @@ __global__ void CUFLU_FluidSolver_RTVD(
    const double g_Corner[][3],
    const real g_Pot_USG[][ CUBE(USG_NXT_F) ],
    const real dt, const real _dh, const bool StoreFlux,
-   const bool XYZ, const real MinDens, const real MinPres, const real MinEint,
+   const bool XYZ, const real MinDens, const real MinPres, const real MinEint, const long PassiveFloor,
    const EoS_t EoS );
 #elif ( FLU_SCHEME == MHM  ||  FLU_SCHEME == MHM_RP )
 __global__
@@ -44,6 +44,7 @@ void CUFLU_FluidSolver_MHM(
    const bool UsePot, const OptExtAcc_t ExtAcc, const ExtAcc_t ExtAcc_Func,
    const real MinDens, const real MinPres, const real MinEint,
    const real DualEnergySwitch,
+   const long PassiveFloor,
    const bool NormPassive, const int NNorm,
    const bool FracPassive, const int NFrac,
    const bool JeansMinPres, const real JeansMinPres_Coeff,
@@ -72,6 +73,7 @@ void CUFLU_FluidSolver_CTU(
    const bool UsePot, const OptExtAcc_t ExtAcc, const ExtAcc_t ExtAcc_Func,
    const real MinDens, const real MinPres, const real MinEint,
    const real DualEnergySwitch,
+   const long PassiveFloor,
    const bool NormPassive, const int NNorm,
    const bool FracPassive, const int NFrac,
    const bool JeansMinPres, const real JeansMinPres_Coeff,
@@ -79,8 +81,8 @@ void CUFLU_FluidSolver_CTU(
 #endif // FLU_SCHEME
 __global__ void CUFLU_dtSolver_HydroCFL( real g_dt_Array[], const real g_Flu_Array[][FLU_NIN_T][ CUBE(PS1) ],
                                          const real g_Mag_Array[][NCOMP_MAG][ PS1P1*SQR(PS1) ],
-                                         const real dh, const real Safety, const real MinPres, const EoS_t EoS,
-                                         const MicroPhy_t MicroPhy );
+                                         const real dh, const real Safety, const real MinPres,
+                                         const long PassiveFloor, const EoS_t EoS, const MicroPhy_t MicroPhy );
 #ifdef GRAVITY
 __global__
 void CUPOT_dtSolver_HydroGravity( real g_dt_Array[], const real g_Pot_Array[][ CUBE(GRA_NXT) ],
@@ -91,13 +93,50 @@ void CUPOT_dtSolver_HydroGravity( real g_dt_Array[], const real g_Pot_Array[][ C
 #endif
 
 #elif ( MODEL == ELBDM )
-__global__ void CUFLU_ELBDMSolver( real g_Fluid_In [][FLU_NIN ][ CUBE(FLU_NXT) ],
-                                   real g_Fluid_Out[][FLU_NOUT][ CUBE(PS2) ],
-                                   real g_Flux     [][9][NFLUX_TOTAL][ SQR(PS2) ],
-                                   const real dt, const real _dh, const real Eta, const bool StoreFlux,
-                                   const real Taylor3_Coeff, const bool XYZ, const real MinDens );
+# if   ( WAVE_SCHEME == WAVE_FD )
+__global__ void CUFLU_ELBDMSolver_FD( real g_Fluid_In [][FLU_NIN ][ CUBE(FLU_NXT) ],
+                                      real g_Fluid_Out[][FLU_NOUT][ CUBE(PS2) ],
+                                      real g_Flux     [][9][NFLUX_TOTAL][ SQR(PS2) ],
+                                      const real dt, const real _dh, const real Eta, const bool StoreFlux,
+                                      const real Taylor3_Coeff, const bool XYZ, const real MinDens );
+# elif ( WAVE_SCHEME == WAVE_GRAMFE )
+#  if   ( GRAMFE_SCHEME == GRAMFE_FFT )
+__global__ void CUFLU_ELBDMSolver_GramFE_FFT( real g_Fluid_In [][FLU_NIN ][ CUBE(FLU_NXT) ],
+                                              real g_Fluid_Out[][FLU_NOUT ][ CUBE(PS2) ],
+                                              real g_Flux     [][9][NFLUX_TOTAL][ SQR(PS2) ],
+                                              const real dt, const real _dh, const real Eta, const bool StoreFlux,
+                                              const bool XYZ, const real MinDens,
+                                              typename FFT::workspace_type  Workspace,
+                                              typename IFFT::workspace_type WorkspaceInv );
+#  elif ( GRAMFE_SCHEME == GRAMFE_MATMUL )
+__global__ void CUFLU_ELBDMSolver_GramFE_MATMUL( real g_Fluid_In [][FLU_NIN ][ CUBE(FLU_NXT) ],
+                                                 real g_Fluid_Out[][FLU_NOUT][ CUBE(PS2) ],
+                                                 real g_Flux     [][9][NFLUX_TOTAL][ SQR(PS2) ],
+                                                 gramfe_matmul_float g_TimeEvo[][ FLU_NXT*2 ],
+                                                 const real dt, const real dh, const real Eta, const bool StoreFlux,
+                                                 const bool XYZ, const real MinDens );
+#  else // GRAMFE_SCHEME
+#     error : ERROR : unsupported GRAMFE_SCHEME !!
+#  endif // GRAMFE_SCHEME
+# else // WAVE_SCHEME
+#  error : ERROR : unsupported WAVE_SCHEME !!
+# endif // WAVE_SCHEME
 
-#else
+#if ( ELBDM_SCHEME == ELBDM_HYBRID )
+__global__ void CUFLU_ELBDMSolver_HamiltonJacobi( real g_Fluid_In [][FLU_NIN ][ CUBE(HYB_NXT) ],
+                                                  #ifdef GAMER_DEBUG
+                                                  real g_Fluid_Out[][FLU_NOUT][ CUBE(PS2) ],
+                                                  #else
+                                                  real g_Fluid_Out[][FLU_NIN ][ CUBE(PS2) ],
+                                                  #endif
+                                                  real g_Flux     [][9][NFLUX_TOTAL][ SQR(PS2) ],
+                                                  const bool g_IsCompletelyRefined[],
+                                                  const bool g_HasWaveCounterpart[][ CUBE(HYB_NXT) ],
+                                                  const real dt, const real _dh, const real Eta, const bool StoreFlux,
+                                                  const bool XYZ, const real MinDens );
+#endif // #if ( ELBDM_SCHEME == ELBDM_HYBRID )
+
+#else // MODEL
 #error : ERROR : unsupported MODEL !!
 #endif // MODEL
 
@@ -158,7 +197,7 @@ void CUSRC_SrcSolver_IterateAllCells(
    const double g_Corner_Array[][3],
    const SrcTerms_t SrcTerms, const int NPatchGroup, const real dt, const real dh,
    const double TimeNew, const double TimeOld,
-   const real MinDens, const real MinPres, const real MinEint, const EoS_t EoS );
+   const real MinDens, const real MinPres, const real MinEint, const long PassiveFloor, const EoS_t EoS );
 
 
 
@@ -192,7 +231,22 @@ void CUAPI_SetCache()
 #  endif
 
 #  elif ( MODEL == ELBDM )
-   CUDA_CHECK_ERROR(  cudaFuncSetCacheConfig( CUFLU_ELBDMSolver,                  cudaFuncCachePreferShared )  );
+#  if   ( WAVE_SCHEME == WAVE_FD )
+   CUDA_CHECK_ERROR(  cudaFuncSetCacheConfig( CUFLU_ELBDMSolver_FD,               cudaFuncCachePreferShared )  );
+#  elif ( WAVE_SCHEME == WAVE_GRAMFE )
+#   if   ( GRAMFE_SCHEME == GRAMFE_FFT )
+   CUDA_CHECK_ERROR(  cudaFuncSetCacheConfig( CUFLU_ELBDMSolver_GramFE_FFT,       cudaFuncCachePreferShared )  );
+#   elif ( GRAMFE_SCHEME == GRAMFE_MATMUL )
+   CUDA_CHECK_ERROR(  cudaFuncSetCacheConfig( CUFLU_ELBDMSolver_GramFE_MATMUL,    cudaFuncCachePreferShared )  );
+#   else // GRAMFE_SCHEME
+#   error : ERROR : unsupported GRAMFE_SCHEME !!
+#   endif // GRAMFE_SCHEME
+#  else // WAVE_SCHEME
+#  error : ERROR : unsupported WAVE_SCHEME !!
+#  endif // WAVE_SCHEME
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   CUDA_CHECK_ERROR(  cudaFuncSetCacheConfig( CUFLU_ELBDMSolver_HamiltonJacobi,   cudaFuncCachePreferShared )  );
+#  endif
 
 #  else
 #  error : ERROR : unsupported MODEL !!

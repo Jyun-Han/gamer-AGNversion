@@ -30,6 +30,12 @@ datatypes in the HDF5 format
 # else
 #  define H5T_GAMER_REAL_PAR H5T_NATIVE_FLOAT
 # endif
+
+# ifdef INT8_PAR
+#  define H5T_GAMER_LONG_PAR H5T_NATIVE_LONG
+# else
+#  define H5T_GAMER_LONG_PAR H5T_NATIVE_INT
+# endif
 #endif // #ifdef PARTICLE
 
 
@@ -74,8 +80,11 @@ struct KeyInfo_t
    int    NMagStored;               // NCOMP_MAG (declare it even when MHD is off)
 #  ifdef PARTICLE
    long   Par_NPar;                 // amr->Par->NPar_Active_AllRank
-   int    Par_NAttStored;           // PAR_NATT_STORED
+   long   Par_NextPUID;             // amr->Par->NextPUID
+   int    Par_NAttFltStored;        // PAR_NATT_FLT_STORED
+   int    Par_NAttIntStored;        // PAR_NATT_INT_STORED
    int    Float8_Par;
+   int    Int8_Par;
 #  endif
 #  ifdef COSMIC_RAY
    int    CR_Diffusion;
@@ -88,12 +97,18 @@ struct KeyInfo_t
 #  ifdef GRAVITY
    double AveDens_Init;             // AveDensity_Init
 #  endif
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   int    UseWaveScheme[NLEVEL];    // AMR levels where wave solver is used
+#  endif
 
    char  *CodeVersion;
    char  *DumpWallTime;
    char  *GitBranch;
    char  *GitCommit;
    long   UniqueDataID;
+
+// conserved variables
+   double ConRef[1+NCONREF_MAX];
 
 }; // struct KeyInfo_t
 
@@ -129,6 +144,7 @@ struct Makefile_t
    int Laohu;
    int SupportHDF5;
    int SupportGSL;
+   int SupportSpectralInt;
    int SupportFFTW;
    int SupportLibYT;
 #  ifdef SUPPORT_LIBYT
@@ -160,8 +176,11 @@ struct Makefile_t
    int CosmicRay;
    int EoS;
    int BarotropicEoS;
+   int ExactCooling;
 
 #  elif ( MODEL == ELBDM )
+   int ELBDMScheme;
+   int WaveScheme;
    int ConserveMass;
    int Laplacian4th;
    int SelfInteraction4;
@@ -176,8 +195,10 @@ struct Makefile_t
    int StoreParAcc;
    int StarFormation;
    int Feedback;
-   int Par_NAttUser;
+   int Par_NAttFltUser;
+   int Par_NAttIntUser;
    int Float8_Par;
+   int Int8_Par;
 #  endif
 
 #  ifdef COSMIC_RAY
@@ -258,7 +279,8 @@ struct SymConst_t
 
 
 #  ifdef PARTICLE
-   int    Par_NAttStored;
+   int    Par_NAttFltStored;
+   int    Par_NAttIntStored;
    int    Par_NType;
 #  ifdef GRAVITY
    int    RhoExt_GhostSize;
@@ -277,6 +299,12 @@ struct SymConst_t
 
    int    InterpMask;
    int    FB_SepFluOut;
+
+#  if ( MODEL == HYDRO )
+   int    ExtraEoSCheck;
+#  endif
+   int    CheckUnphyRnd;
+   double CheckUnphyRndFactor;
 
 
 #  if   ( MODEL == HYDRO )
@@ -307,9 +335,21 @@ struct SymConst_t
    int    EoSNAuxMax;
    int    EoSNTableMax;
 
-#  elif  ( MODEL == ELBDM )
+#  elif ( MODEL == ELBDM )
    int    Flu_BlockSize_x;
    int    Flu_BlockSize_y;
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   int    Flu_HJ_BlockSize_y;
+#  endif
+#  if ( WAVE_SCHEME == WAVE_GRAMFE )
+   int    GramFEScheme;
+   int    GramFEGamma;
+   int    GramFEG;
+   int    GramFENDelta;
+   int    GramFEOrder;
+   int    GramFEND;
+   int    GramFEFluNxt;
+#  endif
 
 #  else
 #  error : ERROR : unsupported MODEL !!
@@ -326,9 +366,11 @@ struct SymConst_t
    int    Src_BlockSize;
    int    Src_GhostSize;
    int    Src_Nxt;
+#  if ( MODEL == HYDRO )
    int    Src_NAuxDlep;
    int    Src_DlepProfNVar;
    int    Src_DlepProfNBinMax;
+#  endif
    int    Src_NAuxUser;
 
    int    Der_GhostSize;
@@ -342,6 +384,8 @@ struct SymConst_t
 
    int    NFieldStoredMax;
 
+   int    NConRefMax;
+
 }; // struct SymConst_t
 
 
@@ -351,7 +395,7 @@ struct SymConst_t
 // Structure   :  InputPara_t
 // Description :  Data structure for outputting the run-time parameters
 //
-// Note        :  1. All run-time parameters are loaded from the files "Input__XXX"
+// Note        :  1. Most of the run-time parameters are loaded from the files "Input__XXX"
 //-------------------------------------------------------------------------------------------------------
 struct InputPara_t
 {
@@ -391,10 +435,13 @@ struct InputPara_t
 // particle
 #  ifdef PARTICLE
    int    Par_Init;
+   int    Par_FlagInit;
    int    Par_ICFormat;
    double Par_ICMass;
    int    Par_ICType;
+   int    Par_ICPUID;
    int    Par_ICFloat8;
+   int    Par_ICInt8;
    int    Par_Interp;
    int    Par_InterpTracer;
    int    Par_Integ;
@@ -406,7 +453,9 @@ struct InputPara_t
    int    Par_GhostSize;
    int    Par_GhostSizeTracer;
    int    Par_TracerVelCorr;
-   char  *ParAttLabel[PAR_NATT_TOTAL];
+   int    Opt__ParInitCheck;
+   char  *ParAttFltLabel[PAR_NATT_FLT_TOTAL];
+   char  *ParAttIntLabel[PAR_NATT_INT_TOTAL];
 #  endif
 
 // cosmology
@@ -425,7 +474,13 @@ struct InputPara_t
 #  endif
 #  if ( MODEL == ELBDM )
    double Dt__Phase;
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   double Dt__HybridCFL;
+   double Dt__HybridCFLInit;
+   double Dt__HybridVelocity;
+   double Dt__HybridVelocityInit;
 #  endif
+#  endif // #if ( MODEL == ELBDM )
 #  ifdef PARTICLE
    double Dt__ParVel;
    double Dt__ParVelMax;
@@ -433,6 +488,9 @@ struct InputPara_t
 #  endif
 #  ifdef CR_DIFFUSION
    double Dt__CR_Diffusion;
+#  endif
+#  ifdef SUPPORT_GRACKLE
+   double Dt__GrackleCooling;
 #  endif
 #  ifdef COMOVING
    double Dt__MaxDeltaA;
@@ -464,6 +522,14 @@ struct InputPara_t
    int    MaxLevel;
    int    Opt__Flag_Rho;
    int    Opt__Flag_RhoGradient;
+   int    Opt__Flag_Angular;
+   double FlagAngular_CenX;
+   double FlagAngular_CenY;
+   double FlagAngular_CenZ;
+   int    Opt__Flag_Radial;
+   double FlagRadial_CenX;
+   double FlagRadial_CenY;
+   double FlagRadial_CenZ;
 #  if ( MODEL == HYDRO )
    int    Opt__Flag_PresGradient;
    int    Opt__Flag_Vorticity;
@@ -474,13 +540,21 @@ struct InputPara_t
 #  ifdef SRHD
    int    Opt__Flag_LrtzGradient;
 #  endif
+#  ifdef SUPPORT_GRACKLE
+   int    Opt__Flag_CoolingLen;
+#  endif
 #  ifdef COSMIC_RAY
    int    Opt__Flag_CRay;
 #  endif
-#  endif
+#  endif // #if ( MODEL == HYDRO )
 #  if ( MODEL == ELBDM )
    int    Opt__Flag_EngyDensity;
+   int    Opt__Flag_Spectral;
+   int    Opt__Flag_Spectral_N;
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   int    Opt__Flag_Interference;
 #  endif
+#  endif // #if ( MODEL == ELBDM )
    int    Opt__Flag_LohnerDens;
 #  if ( MODEL == HYDRO )
    int    Opt__Flag_LohnerEngy;
@@ -499,6 +573,8 @@ struct InputPara_t
    int    Opt__Flag_NParPatch;
    int    Opt__Flag_NParCell;
    int    Opt__Flag_ParMassCell;
+   int    Opt__Flag_ParTarget;
+   int    Opt__Flag_ParTargetSib;
 #  endif
    int    Opt__NoFlagNearBoundary;
    int    Opt__PatchCount;
@@ -515,6 +591,7 @@ struct InputPara_t
    double LB_Par_Weight;
 #  endif
    int    Opt__RecordLoadBalance;
+   int    Opt__LB_ExchangeFather;
 #  endif
    int    Opt__MinimizeMPIBarrier;
 
@@ -546,6 +623,13 @@ struct InputPara_t
 #  endif
    double ELBDM_Taylor3_Coeff;
    int    ELBDM_Taylor3_Auto;
+   int    ELBDM_RemoveMotionCM;
+   int    ELBDM_RescaleMassError;
+   int    ELBDM_RescaleMassSteps;
+   int    ELBDM_BaseSpectral;
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   int    ELBDM_FirstWaveLevel;
+#  endif
 #  endif // ELBDM
 
 // fluid solvers in different models
@@ -559,6 +643,7 @@ struct InputPara_t
    int    Opt__FixUp_Restrict;
    long   FixUpRestrict_Var;
    int    Opt__CorrAfterAllSync;
+   long   PassiveFloor_Var;
    int    Opt__NormalizePassive;
    int    NormalizePassive_NVar;
    int    NormalizePassive_VarIdx[NCOMP_PASSIVE];
@@ -618,11 +703,19 @@ struct InputPara_t
    int    Src_Deleptonization;
    int    Src_User;
    int    Src_GPU_NPGroup;
+   int    Src_ExactCooling;
+#  ifdef EXACT_COOLING
+   int    Src_EC_TEF_N;
+   double Src_EC_dtCoef;
+#  endif
 
 // Grackle
 #  ifdef SUPPORT_GRACKLE
    int    Grackle_Activate;
    int    Grackle_Verbose;
+#  ifndef COMOVING
+   double Grackle_Redshift;
+#  endif
    int    Grackle_Cooling;
    int    Grackle_Primordial;
    int    Grackle_Metal;
@@ -634,6 +727,12 @@ struct InputPara_t
    int    Grackle_ThreeBodyRate;
    int    Grackle_CIE_Cooling;
    int    Grackle_H2_OpaApprox;
+   int    Grackle_UseVHeatingRate;
+   int    Grackle_UseSHeatingRate;
+   int    Grackle_UseTempFloor;
+   double Grackle_TempFloorScalar;
+   double Grackle_HydrogenMFrac;
+   int    Opt__UnfreezeGrackle;
    int    Che_GPU_NPGroup;
 #  endif
 
@@ -700,7 +799,11 @@ struct InputPara_t
 #  endif
 #  if ( MODEL == ELBDM )
    int    Opt__Int_Phase;
+   int    Opt__Res_Phase;
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   int    Opt__Hybrid_Match_Phase;
 #  endif
+#  endif // #if ( MODEL == ELBDM )
    int    Opt__Flu_IntScheme;
    int    Opt__RefFlu_IntScheme;
 #  ifdef MHD
@@ -719,6 +822,14 @@ struct InputPara_t
 #  endif
    int    Mono_MaxIter;
    int    IntOppSign0thOrder;
+#  ifdef SUPPORT_SPECTRAL_INT
+   char  *SpecInt_TablePath;
+   int    SpecInt_GhostBoundary;
+#  if ( MODEL == ELBDM )
+   int    SpecInt_XY_Instead_DePha;
+   double SpecInt_VortexThreshold;
+#  endif
+#  endif
 
 // data dump
    int    Opt__Output_Total;
@@ -726,6 +837,7 @@ struct InputPara_t
    int    Opt__Output_User;
 #  ifdef PARTICLE
    int    Opt__Output_Par_Mode;
+   int    Opt__Output_Par_Mesh;
 #  endif
    int    Opt__Output_BasePS;
    int    Opt__Output_Base;
@@ -753,6 +865,11 @@ struct InputPara_t
    int    Opt__Output_3Velocity;
    int    Opt__Output_Enthalpy;
 #  endif
+#  ifdef SUPPORT_GRACKLE
+   int    Opt__Output_GrackleTemp;
+   int    Opt__Output_GrackleMu;
+   int    Opt__Output_GrackleTCool;
+#  endif
 #  endif // #if ( MODEL == HYDRO )
    int    Opt__Output_UserField;
    int    Opt__Output_Mode;
@@ -760,6 +877,7 @@ struct InputPara_t
    int    Opt__Output_Step;
    double Opt__Output_Dt;
    char  *Opt__Output_Text_Format_Flt;
+   int    Opt__Output_Text_Length_Int;
    double Output_PartX;
    double Output_PartY;
    double Output_PartZ;
@@ -821,6 +939,8 @@ struct InputPara_t
    double FlagTable_Rho         [NLEVEL-1];
    double FlagTable_RhoGradient [NLEVEL-1];
    double FlagTable_Lohner      [NLEVEL-1][5];
+   double FlagTable_Angular     [NLEVEL-1][3];
+   double FlagTable_Radial      [NLEVEL-1];
    hvl_t  FlagTable_User        [NLEVEL-1];
 #  if   ( MODEL == HYDRO )
    double FlagTable_PresGradient[NLEVEL-1];
@@ -832,12 +952,19 @@ struct InputPara_t
 #  ifdef SRHD
    double FlagTable_LrtzGradient[NLEVEL-1];
 #  endif
+#  ifdef SUPPORT_GRACKLE
+   double FlagTable_CoolingLen  [NLEVEL-1];
+#  endif
 #  ifdef COSMIC_RAY
    double FlagTable_CRay        [NLEVEL-1];
 #  endif
 #  elif ( MODEL == ELBDM )
    double FlagTable_EngyDensity [NLEVEL-1][2];
+   double FlagTable_Spectral    [NLEVEL-1][2];
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   double FlagTable_Interference[NLEVEL-1][4];
 #  endif
+#  endif // MODEL
 #  ifdef PARTICLE
    int    FlagTable_NParPatch   [NLEVEL-1];
    int    FlagTable_NParCell    [NLEVEL-1];
@@ -878,6 +1005,7 @@ inline void SyncHDF5File( const char *FileName )
 
 
 
+// TYPE_* must align with the hard-coded values in Output_DumpData_Total_HDF5.cpp: GetCompound_General() and H5_write_compound()
 #define NPARA_MAX    1000     // maximum number of parameters
 #define TYPE_INT        1     // various data types
 #define TYPE_LONG       2
@@ -892,12 +1020,24 @@ inline void SyncHDF5File( const char *FileName )
 
 //-------------------------------------------------------------------------------------------------------
 // Structure   :  HDF5_Output_t
-// Description :  Data structure for outputting the user run-time parameters
+// Description :  Data structure for outputting user-defined run-time parameters
 //
-// Note        :  1. Run-time parameters are stored by Output_HDF5_User_Ptr or Output_HDF5_TestProb_Ptr function
+// Note        : 1. Run-time parameters are stored using Output_HDF5_UserPara_Ptr() or Output_HDF5_InputTest_Ptr()
+//
+// Data Member :  NPara     : Total number of parameters
+//                TotalSize : Size of the structure
+//                Key       : Parameter names
+//                Ptr       : Pointer to the parameter variables
+//                Type      : Parameter data types
+//                TypeSize  : Size of parameter data type
+//
+// Method      :  HDF5_Output_t : Constructor
+//               ~HDF5_Output_t : Destructor
+//                Add           : Add a new parameter
 //-------------------------------------------------------------------------------------------------------
 struct HDF5_Output_t
 {
+
 // data members
    int     NPara;
    size_t  TotalSize;
@@ -906,12 +1046,12 @@ struct HDF5_Output_t
    int    *Type;
    size_t *TypeSize;
 
-//===================================================================================
-// Constructor :  HDF5_Output_t
-// Description :  Constructor of the structure "HDF5_Output_t"
-//
-// Note        :  Initialize variables and allocate memory
-//===================================================================================
+   //===================================================================================
+   // Constructor :  HDF5_Output_t
+   // Description :  Constructor of the structure "HDF5_Output_t"
+   //
+   // Note        :  Initialize variables and allocate memory
+   //===================================================================================
    HDF5_Output_t()
    {
 
@@ -924,12 +1064,12 @@ struct HDF5_Output_t
 
    } // METHOD : HDF5_Output_t
 
-//===================================================================================
-// Constructor :  ~HDF5_Output_t
-// Description :  Destructor of the structure "HDF5_Output_t"
-//
-// Note        :  Deallocate memory
-//===================================================================================
+   //===================================================================================
+   // Constructor :  ~HDF5_Output_t
+   // Description :  Destructor of the structure "HDF5_Output_t"
+   //
+   // Note        :  Deallocate memory
+   //===================================================================================
    ~HDF5_Output_t()
    {
 
@@ -940,14 +1080,14 @@ struct HDF5_Output_t
 
    } // METHOD : ~HDF5_Output_t
 
-//===================================================================================
-// Constructor :  Add
-// Description :  Add a new parameter to be written latter
-//
-// Note        :  1. This function stores the name, address, and data type of the parameter
-//                2. Data type (e.g., integer, float, ...) is determined by the input pointer
-//                3. String parameters are handled by a separate overloaded function
-//===================================================================================
+   //===================================================================================
+   // Constructor :  Add
+   // Description :  Add a new parameter to be written latter
+   //
+   // Note        :  1. This function stores the name, address, and data type of the parameter
+   //                2. Data type (e.g., integer, float, ...) is determined by the input pointer
+   //                3. String parameters are handled by a separate overloaded function
+   //===================================================================================
    template <typename T>
    void Add( const char NewKey[], T* NewPtr )
    {
@@ -965,7 +1105,7 @@ struct HDF5_Output_t
       else if ( typeid(T) == typeid(long  ) )   { Type[NPara] = TYPE_LONG;   TypeSize[NPara] = sizeof(long  ); }
       else if ( typeid(T) == typeid(uint  ) )   { Type[NPara] = TYPE_UINT;   TypeSize[NPara] = sizeof(uint  ); }
       else if ( typeid(T) == typeid(ulong ) )   { Type[NPara] = TYPE_ULONG;  TypeSize[NPara] = sizeof(ulong ); }
-      else if ( typeid(T) == typeid(bool  ) )   { Type[NPara] = TYPE_BOOL;   TypeSize[NPara] = sizeof(int   ); } // bool store as int
+      else if ( typeid(T) == typeid(bool  ) )   { Type[NPara] = TYPE_BOOL;   TypeSize[NPara] = sizeof(int   ); } // bool is stored as int
       else if ( typeid(T) == typeid(float ) )   { Type[NPara] = TYPE_FLOAT;  TypeSize[NPara] = sizeof(float ); }
       else if ( typeid(T) == typeid(double) )   { Type[NPara] = TYPE_DOUBLE; TypeSize[NPara] = sizeof(double); }
       else
@@ -977,12 +1117,12 @@ struct HDF5_Output_t
 
    } // METHOD : Add
 
-//===================================================================================
-// Constructor :  Add (string)
-// Description :  Add a new string parameter to be written later
-//
-// Note        :  1. Overloaded function for strings
-//===================================================================================
+   //===================================================================================
+   // Constructor :  Add (string)
+   // Description :  Add a new string parameter to be written later
+   //
+   // Note        :  1. Overloaded function for strings
+   //===================================================================================
    void Add( const char NewKey[], char* NewPtr )
    {
 
@@ -990,9 +1130,6 @@ struct HDF5_Output_t
 
 //    parameter name
       strncpy( Key[NPara], NewKey, MAX_STRING );
-
-//    make sure C-strings are null-terminated
-      NewPtr[MAX_STRING-1] = '\0';
 
 //    parameter address
       Ptr[NPara] = NewPtr;

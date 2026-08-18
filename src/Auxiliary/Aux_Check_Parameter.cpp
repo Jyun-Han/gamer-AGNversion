@@ -47,6 +47,20 @@ void Aux_Check_Parameter()
 #     error : ERROR : incorrect number of NCOMP_PASSIVE !!
 #  endif
 
+#  ifdef SUPPORT_SPECTRAL_INT
+#  ifndef SUPPORT_GSL
+#     error : ERROR : SUPPORT_SPECTRAL_INT requires SUPPORT_GSL !!
+#  endif
+
+#  ifndef SUPPORT_FFTW
+#     error : ERROR : SUPPORT_SPECTRAL_INT requires SUPPORT_FFTW !!
+#  endif
+
+#  if ( SUPPORT_FFTW == FFTW2  &&  !defined FLOAT8 )
+#     error : ERROR : SUPPORT_SPECTRAL_INT with SUPPORT_FFTW=FFTW2 requires FLOAT8 !!
+#  endif
+#  endif // #ifdef SUPPORT_SPECTRAL_INT
+
 #  ifdef SERIAL
    int NRank = 1;
 #  else
@@ -121,13 +135,13 @@ void Aux_Check_Parameter()
       Aux_Error( ERROR_INFO, "currently the check \"%s\" must work with \"%s\" !!\n",
                  "OPT__CK_REFINE", "OPT__FLAG_RHO" );
 
-   if ( OPT__CK_CONSERVATION  &&  ANGMOM_ORIGIN_X > amr->BoxEdgeR[0] )
+   if ( ANGMOM_ORIGIN_X > amr->BoxEdgeR[0] )
       Aux_Error( ERROR_INFO, "incorrect ANGMOM_ORIGIN_X = %lf (out of range [X<=%lf]) !!\n", ANGMOM_ORIGIN_X, amr->BoxEdgeR[0] );
 
-   if ( OPT__CK_CONSERVATION  &&  ANGMOM_ORIGIN_Y > amr->BoxEdgeR[1] )
+   if ( ANGMOM_ORIGIN_Y > amr->BoxEdgeR[1] )
       Aux_Error( ERROR_INFO, "incorrect ANGMOM_ORIGIN_Y = %lf (out of range [Y<=%lf]) !!\n", ANGMOM_ORIGIN_Y, amr->BoxEdgeR[1] );
 
-   if ( OPT__CK_CONSERVATION  &&  ANGMOM_ORIGIN_Z > amr->BoxEdgeR[2] )
+   if ( ANGMOM_ORIGIN_Z > amr->BoxEdgeR[2] )
       Aux_Error( ERROR_INFO, "incorrect ANGMOM_ORIGIN_Z = %lf (out of range [Z<=%lf]) !!\n", ANGMOM_ORIGIN_Z, amr->BoxEdgeR[2] );
 
    if ( OPT__RECORD_CENTER  &&  COM_CEN_X > amr->BoxSize[0] )
@@ -229,6 +243,11 @@ void Aux_Check_Parameter()
    if ( OPT__MEMORY_POOL  &&  !OPT__REUSE_MEMORY )
       Aux_Error( ERROR_INFO, "please turn on OPT__REUSE_MEMORY for OPT__MEMORY_POOL !!\n" );
 
+#  ifdef __APPLE__
+   if ( OPT__RECORD_MEMORY )
+      Aux_Message( stderr, "WARNING : memory reporting is not currently supported on macOS !!\n" );
+#  endif
+
    if ( OPT__CORR_AFTER_ALL_SYNC != CORR_AFTER_SYNC_NONE  &&  OPT__CORR_AFTER_ALL_SYNC != CORR_AFTER_SYNC_EVERY_STEP  &&
         OPT__CORR_AFTER_ALL_SYNC != CORR_AFTER_SYNC_BEFORE_DUMP )
       Aux_Error( ERROR_INFO, "incorrect option \"OPT__CORR_AFTER_ALL_SYNC = %d\" [0/1/2] !!\n", OPT__CORR_AFTER_ALL_SYNC );
@@ -291,8 +310,13 @@ void Aux_Check_Parameter()
    {
       int NDerField = UserDerField_Num;
 #     if ( MODEL == HYDRO )
-      if ( OPT__OUTPUT_DIVVEL )  NDerField ++;
-      if ( OPT__OUTPUT_MACH   )  NDerField ++;
+      if ( OPT__OUTPUT_DIVVEL        )  NDerField ++;
+      if ( OPT__OUTPUT_MACH          )  NDerField ++;
+#     ifdef SUPPORT_GRACKLE
+      if ( OPT__OUTPUT_GRACKLE_TEMP  )  NDerField ++;
+      if ( OPT__OUTPUT_GRACKLE_MU    )  NDerField ++;
+      if ( OPT__OUTPUT_GRACKLE_TCOOL )  NDerField ++;
+#     endif
 #     endif
 
       if ( NDerField > DER_NOUT_MAX )
@@ -316,6 +340,17 @@ void Aux_Check_Parameter()
       Aux_Error( ERROR_INFO, "OPT__OUTPUT_ENTR does not support EOS_ISOTHERMAL !!\n" );
 #  endif
 #  endif // #if ( MODEL == HYDRO )
+
+
+   if ( strlen(OUTPUT_DIR) > MAX_STRING-1 )
+      Aux_Error( ERROR_INFO, "Length of OUTPUT_DIR (%d) should be smaller than MAX_STRING-1 (%d) !!\n",
+                 strlen(OUTPUT_DIR), MAX_STRING-1 );
+
+   if (  ! Aux_CheckFolderExist( OUTPUT_DIR )  )
+      Aux_Error( ERROR_INFO, "\"%s\" folder set by OUTPUT_DIR does not exist !!\n", OUTPUT_DIR );
+
+   if (  ! Aux_CheckPermission( OUTPUT_DIR, 2+1 )  )
+      Aux_Error( ERROR_INFO, "You do not have write and execute permissions for the \"%s\" folder set by OUTPUT_DIR !!\n", OUTPUT_DIR );
 
 
 
@@ -350,18 +385,18 @@ void Aux_Check_Parameter()
 #  endif
 
    if ( OPT__OUTPUT_TOTAL == OUTPUT_FORMAT_CBINARY )
-   {
       Aux_Message( stderr, "WARNING : OPT__OUTPUT_TOTAL = 2 (C-binary) is deprecated !!\n" );
-#     if ( ( defined PARTICLE ) && ( (defined FLOAT8 && !defined FLOAT8_PAR) || (!defined FLOAT8 && defined FLOAT8_PAR) ) )
-      Aux_Error( ERROR_INFO, "Must adopt FLOAT8_PAR=FLOAT8 for OPT__OUTPUT_TOTAL=2 (C-binary) !!\n" );
-#     endif
-   }
 
    if ( !OPT__OUTPUT_TOTAL  &&  !OPT__OUTPUT_PART  &&  !OPT__OUTPUT_USER  &&  !OPT__OUTPUT_BASEPS )
 #  ifdef PARTICLE
    if ( !OPT__OUTPUT_PAR_MODE )
 #  endif
       Aux_Message( stderr, "WARNING : all output options are turned off --> no data will be output !!\n" );
+
+#  ifdef PARTICLE
+   if ( OPT__OUTPUT_PAR_MESH  &&  OPT__OUTPUT_TOTAL != OUTPUT_FORMAT_HDF5 )
+      Aux_Message( stderr, "WARNING : OPT__OUTPUT_PAR_MESH currently only supports OPT__OUTPUT_TOTAL=%d !!\n", OUTPUT_FORMAT_HDF5 );
+#  endif
 
    if ( StrLen_Flt <= 0 )
       Aux_Message( stderr, "WARNING : StrLen_Flt (%d) <= 0 (OPT__OUTPUT_TEXT_FORMAT_FLT=%s) --> text output might be misaligned !!\n",
@@ -398,6 +433,9 @@ void Aux_Check_Parameter()
 #  ifdef SRHD
    Flag |= OPT__FLAG_LRTZ_GRADIENT;
 #  endif
+#  ifdef SUPPORT_GRACKLE
+   Flag |= OPT__FLAG_COOLING_LEN;
+#  endif
 #  ifdef COSMIC_RAY
    Flag |= OPT__FLAG_CRAY;
    Flag |= OPT__FLAG_LOHNER_CRAY;
@@ -405,11 +443,16 @@ void Aux_Check_Parameter()
 #  endif
 #  if ( MODEL == ELBDM )
    Flag |= OPT__FLAG_ENGY_DENSITY;
+   Flag |= OPT__FLAG_SPECTRAL;
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   Flag |= OPT__FLAG_INTERFERENCE;
 #  endif
+#  endif // #if ( MODEL == ELBDM )
 #  ifdef PARTICLE
    Flag |= OPT__FLAG_NPAR_PATCH;
    Flag |= OPT__FLAG_NPAR_CELL;
    Flag |= OPT__FLAG_PAR_MASS_CELL;
+   Flag |= OPT__FLAG_PAR_TARGET;
 #  endif
 
    if ( !Flag )
@@ -500,6 +543,11 @@ void Aux_Check_Parameter()
       Aux_Message( stderr, "WARNING : INT_OPP_SIGN_0TH_ORDER is not recommended for ELBDM !!\n" );
 #  endif
 
+#  if ( defined SUPPORT_SPECTRAL_INT  &&  MODEL != ELBDM )
+#     warning : WARNING : SUPPORT_SPECTRAL_INT has not been well tested for MODEL != ELBDM !!
+      Aux_Message( stderr, "WARNING : SUPPORT_SPECTRAL_INT has not been well tested for MODEL != ELBDM !!\n" );
+#  endif
+
    } // if ( MPI_Rank == 0 )
 
 
@@ -517,11 +565,6 @@ void Aux_Check_Parameter()
 #  if ( LOAD_BALANCE != HILBERT )
 #     error : ERROR : currently GAMER only supports "LOAD_BALANCE == HILBERT" !!
 #  endif
-
-// for sending fluid data fixed by coarse-fine fluxes correctly
-   if ( OPT__FIXUP_FLUX  &&  Flu_ParaBuf >= PATCH_SIZE )
-      Aux_Error( ERROR_INFO, "\"%s\" is required for \"%s\" in LOAD_BALANCE --> check LB_RecordExchangeFixUpDataPatchID() !!\n",
-                 "Flu_ParaBuf < PATCH_SIZE", "OPT__FIXUP_FLUX" );
 
 // ensure that the variable "PaddedCr1D" will not overflow
    const int Padded              = 1<<NLEVEL;
@@ -687,17 +730,17 @@ void Aux_Check_Parameter()
 #  endif
 
 #  ifdef MHD
-#   if ( RSOLVER != NONE  &&  RSOLVER != ROE  &&  RSOLVER != HLLE  &&  RSOLVER != HLLD )
+#   if ( RSOLVER != OPTION_NONE  &&  RSOLVER != ROE  &&  RSOLVER != HLLE  &&  RSOLVER != HLLD )
 #     error : ERROR : unsupported Riemann solver for MHD (ROE/HLLE/HLLD) !!
 #   endif
-#   if ( RSOLVER_RESCUE != NONE  &&  RSOLVER_RESCUE != ROE  &&  RSOLVER_RESCUE != HLLE  &&  RSOLVER_RESCUE != HLLD )
+#   if ( RSOLVER_RESCUE != OPTION_NONE  &&  RSOLVER_RESCUE != ROE  &&  RSOLVER_RESCUE != HLLE  &&  RSOLVER_RESCUE != HLLD )
 #     error : ERROR : unsupported RSOLVER_RESCUE for MHD (ROE/HLLE/HLLD) !!
 #   endif
 #  else
-#   if ( RSOLVER != NONE  &&  RSOLVER != EXACT  &&  RSOLVER != ROE  &&  RSOLVER != HLLE  &&  RSOLVER != HLLC )
+#   if ( RSOLVER != OPTION_NONE  &&  RSOLVER != EXACT  &&  RSOLVER != ROE  &&  RSOLVER != HLLE  &&  RSOLVER != HLLC )
 #     error : ERROR : unsupported Riemann solver (EXACT/ROE/HLLE/HLLC) !!
 #   endif
-#   if ( RSOLVER_RESCUE != NONE  &&  RSOLVER_RESCUE != EXACT  &&  RSOLVER_RESCUE != ROE  &&  RSOLVER_RESCUE != HLLE  &&  RSOLVER_RESCUE != HLLC )
+#   if ( RSOLVER_RESCUE != OPTION_NONE  &&  RSOLVER_RESCUE != EXACT  &&  RSOLVER_RESCUE != ROE  &&  RSOLVER_RESCUE != HLLE  &&  RSOLVER_RESCUE != HLLC )
 #     error : ERROR : unsupported RSOLVER_RESCUE (EXACT/ROE/HLLE/HLLC) !!
 #   endif
 #  endif // MHD
@@ -944,6 +987,9 @@ void Aux_Check_Parameter()
    else
       Aux_Message( stderr, "WARNING : MIN_DENS (%13.7e) is on --> please ensure that this value is reasonable !!\n", MIN_DENS );
 
+   if ( OPT__OPTIMIZE_AGGRESSIVE )
+      Aux_Message( stderr, "WARNING : input density for fluid solvers does not respect MIN_DENS when OPT__OPTIMIZE_AGGRESSIVE is on!!\n" );
+
    if ( MIN_PRES == 0.0 )
       Aux_Message( stderr, "WARNING : MIN_PRES == 0.0 could be dangerous and is mainly for debugging only !!\n" );
    else
@@ -1178,6 +1224,20 @@ void Aux_Check_Parameter()
 
 // errors
 // ------------------------------
+#  if (  !defined( ELBDM_SCHEME )  ||  ( ELBDM_SCHEME != ELBDM_WAVE && ELBDM_SCHEME != ELBDM_HYBRID )  )
+#     error : ERROR : ELBDM_SCHEME not defined or unsupported in ELBDM !!
+#  endif
+
+#  if (  !defined( WAVE_SCHEME )  ||  ( WAVE_SCHEME != WAVE_FD && WAVE_SCHEME != WAVE_GRAMFE )  )
+#     error : ERROR : WAVE_SCHEME not defined or unsupported in ELBDM !!
+#  endif
+
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+#  if ( !defined( HYBRID_SCHEME )  ||  ( HYBRID_SCHEME != HYBRID_UPWIND && HYBRID_SCHEME != HYBRID_FROMM && HYBRID_SCHEME != HYBRID_MUSCL )  )
+#     error : ERROR : HYBRID_SCHEME not defined or unsupported in ELBDM_HYBRID !!
+#  endif
+#  endif // #if ( ELBDM_SCHEME == ELBDM_HYBRID )
+
 #  if ( NCOMP_FLUID != 3 )
 #     error : ERROR : NCOMP_FLUID != 3 in ELBDM !!
 #  endif
@@ -1200,6 +1260,10 @@ void Aux_Check_Parameter()
 #  endif
 #  endif // ifdef QUARTIC_SELF_INTERACTION
 
+#  ifdef TRACER
+#     error : ERROR : ELBDM does not support TRACER yet !!
+#  endif
+
    if ( ELBDM_PLANCK_CONST <= 0.0 )
       Aux_Error( ERROR_INFO, "%s (%14.7e) <= 0.0 !!\n", "ELBDM_PLANCK_CONST", ELBDM_PLANCK_CONST );
 
@@ -1209,25 +1273,92 @@ void Aux_Check_Parameter()
    if ( OPT__INT_PHASE  &&  OPT__FLU_INT_SCHEME == INT_MINMOD1D )
       Aux_Error( ERROR_INFO, "unsupported interpolation scheme \"%s = %d\" when OPT__INT_PHASE is on !!\n",
                  "OPT__FLU_INT_SCHEME", OPT__FLU_INT_SCHEME );
+   if ( ELBDM_REMOVE_MOTION_CM != ELBDM_REMOVE_MOTION_CM_NONE  &&  !OPT__CK_CONSERVATION )
+      Aux_Error( ERROR_INFO, "\"%s\" must work with \"%s\" !!\n", "ELBDM_REMOVE_MOTION_CM", "OPT__CK_CONSERVATION" );
 
-   if ( MIN_DENS == 0.0  &&  MPI_Rank == 0 )
-      Aux_Message( stderr, "WARNING : MIN_DENS == 0.0 could be dangerous and is mainly for debugging only !!\n" );
-   else if ( MPI_Rank == 0 )
-      Aux_Message( stderr, "WARNING : MIN_DENS (%13.7e) is on --> please ensure that this value is reasonable !!\n", MIN_DENS );
-
-
-// warnings
-// ------------------------------
-   if ( MPI_Rank == 0 ) {
-
-#  if ( NCOMP_PASSIVE > 0 )
-   Aux_Message( stderr, "WARNING : NCOMP_PASSIVE (%d) > 0 but ELBDM does not really support passive scalars !!\n",
-                NCOMP_PASSIVE );
+#  ifdef BITWISE_REPRODUCIBILITY
+   if ( ELBDM_REMOVE_MOTION_CM != ELBDM_REMOVE_MOTION_CM_NONE )
+      Aux_Error( ERROR_INFO, "\"%s\" does NOT support \"%s\" !!\n", "ELBDM_REMOVE_MOTION_CM", "BITWISE_REPRODUCIBILITY" );
 #  endif
 
+   if ( ELBDM_RESCALE_MASS_ERROR  &&  !OPT__CK_CONSERVATION )
+      Aux_Error( ERROR_INFO, "\"%s\" must work with \"%s\" !!\n", "ELBDM_RESCALE_MASS_ERROR", "OPT__CK_CONSERVATION" );
+
+   for (int f=0; f<6; f++)
+      if ( ELBDM_BASE_SPECTRAL  &&  OPT__BC_FLU[f] != BC_FLU_PERIODIC )
+         Aux_Error( ERROR_INFO, "ELBDM_BASE_SPECTRAL only works with periodic boundary condition (OPT__BC_FLU=1) !!\n" );
+
+#  ifndef SUPPORT_FFTW
+   if ( ELBDM_BASE_SPECTRAL )
+      Aux_Error( ERROR_INFO, "ELBDM_BASE_SPECTRAL must work with SUPPORT_FFTW !!\n" );
+#  endif
+
+// check hybrid scheme parameters for errors
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   if ( OPT__INIT == INIT_BY_FILE  &&  OPT__UM_IC_LEVEL >= ELBDM_FIRST_WAVE_LEVEL  &&  ELBDM_MATCH_PHASE )
+      Aux_Error( ERROR_INFO, "ELBDM_HYBRID currently does not support OPT__UM_IC_LEVEL (%d) >= ELBDM_FIRST_WAVE_LEVEL (%d)\n"
+                             "        from UM_IC because of phase matching (ELBDM_MATCH_PHASE) !!\n",
+                 OPT__UM_IC_LEVEL, ELBDM_FIRST_WAVE_LEVEL );
+
+   if ( INIT_SUBSAMPLING_NCELL > 1 )
+      Aux_Error( ERROR_INFO, "ELBDM_HYBRID currently does not support INIT_SUBSAMPLING_NCELL > 1 !!\n" );
+
+   if ( OPT__OUTPUT_TOTAL == 2 )
+      Aux_Error( ERROR_INFO, "ELBDM_HYBRID currently does not support OPT__OUTPUT_TOTAL == 2 !!\n" );
+
+#  if ( FLU_GHOST_SIZE < HYB_GHOST_SIZE )
+#     error : ERROR : FLU_GHOST_SIZE needs to be bigger than HYB_GHOST_SIZE !!
+#  endif
+
+   if ( ELBDM_BASE_SPECTRAL )
+      Aux_Error( ERROR_INFO, "ELBDM_BASE_SPECTRAL is incompatible with ELBDM_SCHEME == ELBDM_HYBRID !!\n" );
+
+// for stability of hybrid scheme with wave levels, all fluid levels require that the flag buffer >= PATCH_SIZE
+// furthermore, the restriction operation needs to be enabled
+   if ( MAX_LEVEL > 0  &&  ELBDM_FIRST_WAVE_LEVEL > 0  &&  ELBDM_FIRST_WAVE_LEVEL <= MAX_LEVEL )
+   {
+      if ( FLAG_BUFFER_SIZE < PATCH_SIZE )
+         Aux_Error( ERROR_INFO, "ELBDM_HYBRID with AMR requires that FLAG_BUFFER_SIZE (%d) is equal to or greater than\n"
+                                "        PATCH_SIZE (%d) on fluid levels to enforce refinement !!\n",
+                    FLAG_BUFFER_SIZE, PATCH_SIZE );
+
+      if ( !OPT__FIXUP_RESTRICT )
+         Aux_Error( ERROR_INFO, "ELBDM_HYBRID with AMR requires the option OPT__FIXUP_RESTRICT !!\n");
+
+      if ( !OPT__INIT_RESTRICT )
+         Aux_Error( ERROR_INFO, "ELBDM_HYBRID with AMR requires the option OPT__INIT_RESTRICT !!\n");
+   }
+
+#  ifdef LOAD_BALANCE
+   if ( !OPT__LB_EXCHANGE_FATHER )
+      Aux_Error( ERROR_INFO, "ELBDM_HYBRID requires the option OPT__LB_EXCHANGE_FATHER for load balancing !!\n");
+#  endif
+
+   const double dt_hybrid_max   = 0.49;
+   const double dt_velocity_max = 3.50;
+
+   if ( DT__HYBRID_CFL > dt_hybrid_max )
+      Aux_Error( ERROR_INFO, "DT__HYBRID_CFL (%13.7e) > %13.7e is unstable !!\n",
+                 DT__HYBRID_CFL, dt_hybrid_max );
+
+   if ( DT__HYBRID_CFL_INIT > dt_hybrid_max )
+      Aux_Error( ERROR_INFO, "DT__HYBRID_CFL_INIT (%13.7e) > %13.7e is unstable !!\n",
+                 DT__HYBRID_CFL_INIT, dt_hybrid_max );
+
+   if ( DT__HYBRID_VELOCITY > dt_velocity_max )
+      Aux_Error( ERROR_INFO, "DT__HYBRID_VELOCITY (%13.7e) > %13.7e is unstable !!\n",
+                 DT__HYBRID_VELOCITY, dt_velocity_max );
+
+   if ( DT__HYBRID_VELOCITY_INIT > dt_velocity_max )
+      Aux_Error( ERROR_INFO, "DT__HYBRID_VELOCITY_INIT (%13.7e) > %13.7e is unstable !!\n",
+                 DT__HYBRID_VELOCITY_INIT, dt_velocity_max );
+#  endif // # if ( ELBDM_SCHEME == ELBDM_HYBRID )
+
+// check finite-difference scheme for errors
+#  if ( WAVE_SCHEME == WAVE_FD )
    if ( !ELBDM_TAYLOR3_AUTO  &&  ELBDM_TAYLOR3_COEFF < 1.0/8.0 )
-      Aux_Message( stderr, "WARNING : ELBDM_TAYLOR3_COEFF (%13.7e) < 0.125 is unconditionally unstable !!\n",
-                   ELBDM_TAYLOR3_COEFF );
+      Aux_Error( ERROR_INFO, "ELBDM_TAYLOR3_COEFF (%13.7e) < 0.125 is unconditionally unstable !!\n",
+                 ELBDM_TAYLOR3_COEFF );
 
 #  ifdef LAPLACIAN_4TH
    const double dt_fluid_max = 3.0*M_PI/16.0;
@@ -1235,12 +1366,12 @@ void Aux_Check_Parameter()
    const double dt_fluid_max = 0.25*M_PI;
 #  endif
    if ( DT__FLUID > dt_fluid_max )
-      Aux_Message( stderr, "WARNING : DT__FLUID (%13.7e) > %13.7e is unconditionally unstable (even with %s) !!\n",
-                   DT__FLUID, dt_fluid_max, "ELBDM_TAYLOR3_AUTO" );
+      Aux_Error( ERROR_INFO, "DT__FLUID (%13.7e) > %13.7e is unconditionally unstable (even with %s) !!\n",
+                 DT__FLUID, dt_fluid_max, "ELBDM_TAYLOR3_AUTO" );
 
    if ( DT__FLUID_INIT > dt_fluid_max )
-      Aux_Message( stderr, "WARNING : DT__FLUID_INIT (%13.7e) > %13.7e is unconditionally unstable (even with %s) !!\n",
-                   DT__FLUID_INIT, dt_fluid_max, "ELBDM_TAYLOR3_AUTO" );
+      Aux_Error( ERROR_INFO, "DT__FLUID_INIT (%13.7e) > %13.7e is unconditionally unstable (even with %s) !!\n",
+                 DT__FLUID_INIT, dt_fluid_max, "ELBDM_TAYLOR3_AUTO" );
 
    if ( !ELBDM_TAYLOR3_AUTO )
    {
@@ -1253,22 +1384,70 @@ void Aux_Check_Parameter()
 
       if ( DT__FLUID > dt_fluid_max_normal  &&  ELBDM_TAYLOR3_COEFF <= 1.0/6.0 )
       {
-         Aux_Message( stderr, "WARNING : DT__FLUID (%13.7e) > stability limit (%13.7e) for ELBDM_TAYLOR3_COEFF <= 1/6\n",
-                      DT__FLUID, dt_fluid_max_normal );
-         Aux_Message( stderr, "          --> Please either (a) set ELBDM_TAYLOR3_COEFF (%13.7e) > 1/6\n",
-                      ELBDM_TAYLOR3_COEFF );
-         Aux_Message( stderr, "                            (b) set DT__FLUID smaller (c) turn on ELBDM_TAYLOR3_AUTO\n" );
+         Aux_Error( ERROR_INFO, "DT__FLUID (%13.7e) > stability limit (%13.7e) for ELBDM_TAYLOR3_COEFF <= 1/6\n"
+                                "    --> Please set ELBDM_TAYLOR3_COEFF (%13.7e) > 1/6, reduce DT__FLUID, or enable ELBDM_TAYLOR3_AUTO\n",
+                    DT__FLUID, dt_fluid_max_normal, ELBDM_TAYLOR3_COEFF );
       }
 
       if ( DT__FLUID_INIT > dt_fluid_max_normal  &&  ELBDM_TAYLOR3_COEFF <= 1.0/6.0 )
       {
-         Aux_Message( stderr, "WARNING : DT__FLUID_INIT (%13.7e) > stability limit (%13.7e) for ELBDM_TAYLOR3_COEFF <= 1/6\n",
-                      DT__FLUID_INIT, dt_fluid_max_normal );
-         Aux_Message( stderr, "          --> Please either (a) set ELBDM_TAYLOR3_COEFF (%13.7e) > 1/6\n",
-                      ELBDM_TAYLOR3_COEFF );
-         Aux_Message( stderr, "                            (b) set DT__FLUID_INIT smaller (c) turn on ELBDM_TAYLOR3_AUTO\n" );
+         Aux_Error( ERROR_INFO, "DT__FLUID_INIT (%13.7e) > stability limit (%13.7e) for ELBDM_TAYLOR3_COEFF <= 1/6\n"
+                                "    --> Please set ELBDM_TAYLOR3_COEFF (%13.7e) > 1/6, reduce DT__FLUID_INIT, or enable ELBDM_TAYLOR3_AUTO\n",
+                    DT__FLUID_INIT, dt_fluid_max_normal, ELBDM_TAYLOR3_COEFF );
       }
    }
+
+// check local spectral scheme for errors
+#  elif ( WAVE_SCHEME == WAVE_GRAMFE )
+
+   const double dt_fluid_max = 0.35;
+
+   if ( DT__FLUID > dt_fluid_max )
+      Aux_Error( ERROR_INFO, "%s solver with DT__FLUID (%13.7e) > %13.7e is unstable !!\n",
+                 "WAVE_GRAMFE", DT__FLUID, dt_fluid_max );
+
+#  if   ( GRAMFE_SCHEME == GRAMFE_FFT )
+
+#  if ( FLU_GHOST_SIZE < 6 )
+#     error : ERROR : WAVE_GRAMFE is only stable (empirically) for FLU_GHOST_SIZE >= 6 !!
+#  endif
+
+#  ifndef GRAMFE_FFT_FLOAT8
+#     error : ERROR : WAVE_GRAMFE solver requires GRAMFE_FFT_FLOAT8 for stability !!
+#  endif
+
+
+#  if ( !defined(GPU)  &&  !defined(SUPPORT_FFTW) )
+#     error : ERROR : CPU && GRAMFE_SCHEME == GRAMFE_FFT require SUPPORT_FFTW flag !!
+#  endif
+
+#  if ( !defined(GPU)  &&  SUPPORT_FFTW == FFTW2  &&  !defined(FLOAT8) )
+#     error : ERROR : CPU && GRAMFE_SCHEME == GRAMFE_FFT && SUPPORT_FFTW = FFTW2 require FLOAT8 !!
+#  endif
+
+#  elif ( GRAMFE_SCHEME == GRAMFE_MATMUL )
+
+#  ifndef SUPPORT_GSL
+#     error : ERROR : GRAMFE_SCHEME == GRAMFE_MATMUL requires SUPPORT_GSL !!
+#  endif
+
+#  else // GRAMFE_SCHEME
+#  error : ERROR : unsupported GRAMFE_SCHEME !!
+#  endif // GRAMFE_SCHEME
+
+#  else // WAVE_SCHEME
+#  error : ERROR : unsupported WAVE_SCHEME !!
+#  endif // WAVE_SCHEME
+
+
+// warnings
+// ------------------------------
+   if ( MPI_Rank == 0 ) {
+
+#  if ( NCOMP_PASSIVE > 0 )
+   Aux_Message( stderr, "WARNING : NCOMP_PASSIVE (%d) > 0 but ELBDM does not really support passive scalars !!\n",
+                NCOMP_PASSIVE );
+#  endif
 
    if ( DT__PHASE > 1.0 )
       Aux_Message( stderr, "WARNING : DT__PHASE (%13.7e) is not within the normal range [0...1] !!\n", DT__PHASE );
@@ -1281,6 +1460,12 @@ void Aux_Check_Parameter()
    if ( !OPT__FIXUP_FLUX )
       Aux_Message( stderr, "WARNING : %s is disabled in ELBDM even though CONSERVE_MASS is on !!\n",
                    "OPT__FIXUP_FLUX" );
+   if ( ELBDM_BASE_SPECTRAL )
+      Aux_Message( stderr, "WARNING : mass may not conserve with the %s solver even though CONSERVE_MASS is on !!\n",
+                   "ELBDM_BASE_SPECTRAL" );
+   if ( ELBDM_BASE_SPECTRAL && OPT__FIXUP_FLUX )
+      Aux_Message( stderr, "WARNING : OPT__FIXUP_FLUX will not be applied to the base level when %s is on !!\n",
+                   "ELBDM_BASE_SPECTRAL" );
 #  else
    if ( OPT__FIXUP_FLUX )
       Aux_Message( stderr, "WARNING : %s is useless in ELBDM when CONSERVE_MASS is off !!\n", "OPT__FIXUP_FLUX" );
@@ -1288,6 +1473,46 @@ void Aux_Check_Parameter()
 
    if ( OPT__INIT == INIT_BY_FILE )
       Aux_Message( stderr, "WARNING : currently we don't check MIN_DENS for the initial data loaded from UM_IC !!\n" );
+
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+// bitwise reproducibility currently fails in hybrid scheme because of conversion from RE/IM to DENS/PHAS when storing fields in HDF5
+// --> possible solution could be to converting RE/IM <-> DENS/PHAS using high-precision routines to ensure bitwise identity for significant digits
+#  ifdef BITWISE_REPRODUCIBILITY
+      Aux_Message( stderr, "WARNING : BITWISE_REPRODUCIBILITY is currently not unsupported for ELBDM_HYBRID during restart !!\n" );
+#  endif
+
+   if ( ! OPT__FLAG_INTERFERENCE )
+      Aux_Message( stderr, "WARNING : OPT__FLAG_INTERFERENCE is off for ELBDM_HYBRID so simulations will never switch to the wave scheme !!\n" );
+
+   if (  OPT__INIT == INIT_BY_FILE  &&  ( !OPT__UM_IC_DOWNGRADE || !OPT__UM_IC_REFINE )  )
+      Aux_Message( stderr, "WARNING : consider enabling both OPT__UM_IC_DOWNGRADE and OPT__UM_IC_REFINE to properly switch to\n"
+                           "          the wave scheme during initialization !!\n" );
+#  endif // #if ( ELBDM_SCHEME == ELBDM_HYBRID )
+
+#  if   ( WAVE_SCHEME == WAVE_FD )
+
+#  elif ( WAVE_SCHEME == WAVE_GRAMFE )
+
+   if ( OPT__FIXUP_FLUX )
+      Aux_Message( stderr, "WARNING : OPT__FIXUP_FLUX will not be applied on wave levels when %s is on !!\n",
+                   "WAVE_SCHEME == WAVE_GRAMFE" );
+
+#  ifdef CONSERVE_MASS
+   Aux_Message( stderr, "WARNING : mass is not conserved with the %s solver even though CONSERVE_MASS is on !!\n",
+                "WAVE_GRAMFE" );
+#  endif // #  ifdef CONSERVE_MASS
+
+#  else
+#  error : ERROR : unsupported WAVE_SCHEME
+#  endif // WAVE_SCHEME
+
+   if ( MIN_DENS == 0.0 )
+      Aux_Message( stderr, "WARNING : MIN_DENS == 0.0 could be dangerous and is mainly for debugging only !!\n" );
+   else
+      Aux_Message( stderr, "WARNING : MIN_DENS (%13.7e) is on --> please ensure that this value is reasonable !!\n", MIN_DENS );
+
+   if ( OPT__OPTIMIZE_AGGRESSIVE )
+      Aux_Message( stderr, "WARNING : input density for fluid solvers does not respect MIN_DENS when OPT__OPTIMIZE_AGGRESSIVE is on!!\n" );
 
    } // if ( MPI_Rank == 0 )
 
@@ -1580,6 +1805,27 @@ void Aux_Check_Parameter()
 #     error : ERROR : SUPPORT_GRACKLE must work with EOS_GAMMA/EOS_COSMIC_RAY !!
 #  endif
 
+   if ( ! GRACKLE_ACTIVATE )
+   {
+      if ( OPT__OUTPUT_GRACKLE_TEMP )
+         Aux_Error( ERROR_INFO, "OPT__OUTPUT_GRACKLE_TEMP requires the option GRACKLE_ACTIVATE !!\n");
+
+      if ( OPT__OUTPUT_GRACKLE_MU )
+         Aux_Error( ERROR_INFO, "OPT__OUTPUT_GRACKLE_MU requires the option GRACKLE_ACTIVATE !!\n");
+
+      if ( OPT__OUTPUT_GRACKLE_TCOOL )
+         Aux_Error( ERROR_INFO, "OPT__OUTPUT_GRACKLE_TCOOL requires the option GRACKLE_ACTIVATE !!\n");
+
+      if ( OPT__FLAG_COOLING_LEN )
+         Aux_Error( ERROR_INFO, "OPT__FLAG_COOLING_LEN requires the option GRACKLE_ACTIVATE !!\n");
+
+      if ( DT__GRACKLE_COOLING >= 0.0 )
+         Aux_Error( ERROR_INFO, "DT__GRACKLE_COOLING requires the option GRACKLE_ACTIVATE !!\n");
+
+      if ( OPT__UNFREEZE_GRACKLE )
+         Aux_Error( ERROR_INFO, "OPT__UNFREEZE_GRACKLE requires the option GRACKLE_ACTIVATE !!\n");
+   }
+
 // warning
 // ------------------------------
    if ( MPI_Rank == 0 ) {
@@ -1589,6 +1835,25 @@ void Aux_Check_Parameter()
 
    if ( GRACKLE_PRIMORDIAL > 0 )
       Aux_Message( stderr, "WARNING : adiabatic index gamma is currently fixed to %13.7e for Grackle !!\n", GAMMA );
+
+   if ( OPT__UNFREEZE_GRACKLE  &&  ! OPT__FREEZE_FLUID )
+      Aux_Message( stderr, "WARNING : OPT__UNFREEZE_GRACKLE is useless when OPT__FREEZE_FLUID is off !!\n" );
+
+   if ( OPT__UNFREEZE_GRACKLE  &&  OPT__FREEZE_FLUID )
+      Aux_Message( stderr, "REMINDER : OPT__UNFREEZE_GRACKLE will allow fluid variables to be updated by Grackle solver even with OPT__FREEZE_FLUID enabled !!\n" );
+
+   if ( OPT__OUTPUT_GRACKLE_TEMP  &&  OPT__OUTPUT_TEMP )
+   {
+      Aux_Message( stderr, "WARNING : temperature field calculated by Grackle is named \"GrackleTemp\"\n"   );
+      Aux_Message( stderr, "          and it is different from the default temperature field \"Temp\" !!\n" );
+   }
+
+   if ( GRACKLE_PRIMORDIAL == GRACKLE_PRI_CHE_CLOUDY )
+   {
+      Aux_Message( stderr, "WARNING : For GRACKLE_PRIMORDIAL == %d, GRACKLE_HYDROGEN_MFRAC = %13.7e is only used outside Grackle\n",
+                           GRACKLE_PRI_CHE_CLOUDY, GRACKLE_HYDROGEN_MFRAC );
+      Aux_Message( stderr, "          and it can be different from HydrogenFractionByMass determined by and used inside Grackle !!\n" );
+   }
 
    } // if ( MPI_Rank == 0 )
 
@@ -1609,6 +1874,20 @@ void Aux_Check_Parameter()
    if ( SrcTerms.Deleptonization )
       Aux_Error( ERROR_INFO, "SRC_DELEPTONIZATION is only supported in HYDRO !!\n" );
 #  endif
+
+#  ifdef EXACT_COOLING
+#  if ( MODEL != HYDRO )
+#     error : ERROR : EXACT_COOLING must enable MODEL=HYDRO !!
+#  endif
+
+#  ifdef COMOVING
+#     error : ERROR : EXACT_COOLING does not support COMOVING !!
+#  endif
+
+#  else // #ifdef EXACT_COOLING
+   if ( SrcTerms.ExactCooling )
+      Aux_Error( ERROR_INFO, "SRC_EXACTCOOLING is only supported when EXACT_COOLING is enabled !!\n" );
+#  endif // #ifdef EXACT_COOLING ... else ...
 
 // warning
 // ------------------------------

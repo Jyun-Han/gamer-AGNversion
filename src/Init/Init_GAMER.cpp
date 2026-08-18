@@ -1,15 +1,6 @@
 #include "GAMER.h"
 
-extern void (*Init_User_Ptr)();
-extern void (*Init_DerivedField_User_Ptr)();
-#ifdef PARTICLE
-extern void (*Par_Init_ByFunction_Ptr)( const long NPar_ThisRank, const long NPar_AllRank,
-                                        real *ParMass, real *ParPosX, real *ParPosY, real *ParPosZ,
-                                        real *ParVelX, real *ParVelY, real *ParVelZ, real *ParTime,
-                                        real *ParType, real *AllAttribute[PAR_NATT_TOTAL] );
-#endif
 
-extern bool   IsInit_tcool[NLEVEL];
 
 
 //-------------------------------------------------------------------------------------------------------
@@ -197,6 +188,12 @@ void Init_GAMER( int *argc, char ***argv )
 #  endif
 
 
+// initialize variables for dumping particle attributes mapped from mesh quantities
+#  ifdef PARTICLE
+   if ( OPT__OUTPUT_PAR_MESH )   Par_Init_Attribute_Mesh();
+#  endif
+
+
 // initialize particles
 #  ifdef PARTICLE
    switch ( amr->Par->Init )
@@ -206,7 +203,7 @@ void Init_GAMER( int *argc, char ***argv )
             Par_Init_ByFunction_Ptr( amr->Par->NPar_Active, amr->Par->NPar_Active_AllRank,
                                      amr->Par->Mass, amr->Par->PosX, amr->Par->PosY, amr->Par->PosZ,
                                      amr->Par->VelX, amr->Par->VelY, amr->Par->VelZ, amr->Par->Time,
-                                     amr->Par->Type, amr->Par->Attribute );
+                                     amr->Par->Type, amr->Par->AttributeFlt, amr->Par->AttributeInt );
          else
             Aux_Error( ERROR_INFO, "Par_Init_ByFunction_Ptr == NULL for PAR_INIT = 1 !!\n" );
          break;
@@ -223,11 +220,22 @@ void Init_GAMER( int *argc, char ***argv )
                     "PAR_INIT", (int)amr->Par->Init );
    }
 
-   if ( amr->Par->Init != PAR_INIT_BY_RESTART )    Par_Aux_InitCheck();
+// set the particle refinement flag
+   if ( amr->Par->Init != PAR_INIT_BY_RESTART  &&  amr->Par->FlagInit != PFLAG_MANUAL )
+   {
+      if ( MPI_Rank == 0 )    Aux_Message( stdout, "%s ...\n", "Par_SetFlag" );
+
+      Par_SetFlag( amr->Par->FlagInit );
+
+      if ( MPI_Rank == 0 )    Aux_Message( stdout, "%s ... done\n", "Par_SetFlag" );
+   }
+
+// check the initial condition of particles
+   if ( amr->Par->Init != PAR_INIT_BY_RESTART  &&  OPT__PAR_INIT_CHECK )    Par_Aux_InitCheck();
 #  endif // #ifdef PARTICLE
 
 
-// initialize the AMR structure and fluid field
+// initialize the local AMR structure and grid fields
    switch ( OPT__INIT )
    {
       case INIT_BY_FUNCTION :    Init_ByFunction();   break;
@@ -240,10 +248,17 @@ void Init_GAMER( int *argc, char ***argv )
    }
 
 
+// initialize the global AMR structure if required
+#  if ( ELBDM_SCHEME == ELBDM_HYBRID )
+   delete GlobalTree;   // in case it has been allocated already
+   GlobalTree = new LB_GlobalTree;
+#  endif
+
+
 // ensure B field consistency on the shared interfaces between sibling patches
-#  if ( MODEL == HYDRO  &&  defined MHD )
-   if ( OPT__SAME_INTERFACE_B )
-   for (int lv=0; lv<NLEVEL; lv++)  MHD_SameInterfaceB( lv );
+#  ifdef MHD
+   if ( OPT__SAME_INTERFACE_B == SAME_INTERFACE_B_YES )
+   for (int lv=0; lv<NLEVEL; lv++)  MHD_SameInterfaceB( lv, amr->FluSg[lv], amr->MagSg[lv] );
 #  endif
 
 
@@ -288,7 +303,7 @@ void Init_GAMER( int *argc, char ***argv )
       } // for (int lv=0; lv<NLEVEL; lv++)
 
       if ( MPI_Rank == 0 )    Aux_Message( stdout, "%s ... done\n", "Calculating gravitational potential" );
-   } // if ( OPT__SELF_GRAVITY_TYPE  ||  OPT__EXT_POT )
+   } // if ( OPT__SELF_GRAVITY  ||  OPT__EXT_POT )
 #  endif // #ifdef GARVITY
 
 
@@ -324,6 +339,22 @@ void Init_GAMER( int *argc, char ***argv )
 
 // user-defined initialization (after the Poisson solver)
    if ( Init_User_AfterPoisson_Ptr != NULL )    Init_User_AfterPoisson_Ptr();
+
+
+#  ifdef PARTICLE
+// assign initial particle UIDs AFTER all routines that may add particles,
+// including Par_Init_ByFunction_Ptr(), Par_Init_ByFile(), AddParticle() in Init_ByRestart(), and
+//           Par_AddParticleAfterInit() in Init_User_Ptr() and Init_User_AfterPoisson_Ptr()
+   if ( MPI_Rank == 0 )    Aux_Message( stdout, "%s ...\n", "Par_SetParID (init)" );
+
+   Par_SetParUID();
+
+   if ( MPI_Rank == 0 )    Aux_Message( stdout, "%s ... done\n", "Par_SetParID (init)" );
+
+// only perform this check here if it will not be checked later in Aux_Check()
+   if ( OPT__PAR_INIT_CHECK  &&  !OPT__CK_PARTICLE )
+      Par_Aux_Check_Particle( "Initial particle check after Par_SetParUID" );
+#  endif // #ifdef PARTICLE
 
 
 // initialize source-term fields (e.g., cooling time)

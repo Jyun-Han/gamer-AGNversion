@@ -15,22 +15,24 @@
 // =======================================================================================
 
 // problem-specific function prototypes
-
 bool Flag_CMZ( const int i, const int j, const int k, const int lv, const int PID, const double *Threshold );
 #ifdef PARTICLE
 void Par_Init_ByFunction_BarredPot( const long NPar_ThisRank, const long NPar_AllRank,
                                     real_par *ParMass, real_par *ParPosX, real_par *ParPosY, real_par *ParPosZ,
                                     real_par *ParVelX, real_par *ParVelY, real_par *ParVelZ, real_par *ParTime,
-                                    real_par *ParType, real_par *AllAttribute[PAR_NATT_TOTAL] );
+                                    long_par *ParType,
+                                    real_par *AllAttributeFlt[PAR_NATT_FLT_TOTAL],
+                                    long_par *AllAttributeInt[PAR_NATT_INT_TOTAL] );
 #endif
 static void IsolatedBC( real Array[], const int ArraySize[], real fluid[], const int NVar_Flu,
                         const int GhostSize, const int idx[], const double pos[], const double Time,
                         const int lv, const int TFluVarIdxList[], double AuxArray[] );
-
 //void Init_ExtAcc_BarredPot();
 //void Init_ExtPot_BarredPot();
-
 void Init_ExtPot_TabularP17();
+
+
+
 
 //-------------------------------------------------------------------------------------------------------
 // Function    :  Validate
@@ -93,6 +95,53 @@ void Validate()
 
 #if ( MODEL == HYDRO )
 //-------------------------------------------------------------------------------------------------------
+// Function    :  LoadInputTestProb
+// Description :  Read problem-specific runtime parameters from Input__TestProb and store them in HDF5 snapshots (Data_*)
+//
+// Note        :  1. Invoked by SetParameter() to read parameters
+//                2. Invoked by Output_DumpData_Total_HDF5() using the function pointer Output_HDF5_InputTest_Ptr to store parameters
+//                3. If there is no problem-specific runtime parameter to load, add at least one parameter
+//                   to prevent an empty structure in HDF5_Output_t
+//                   --> Example:
+//                       LOAD_PARA( load_mode, "TestProb_ID", &TESTPROB_ID, TESTPROB_ID, TESTPROB_ID, TESTPROB_ID );
+//
+// Parameter   :  load_mode      : Mode for loading parameters
+//                                 --> LOAD_READPARA    : Read parameters from Input__TestProb
+//                                     LOAD_HDF5_OUTPUT : Store parameters in HDF5 snapshots
+//                ReadPara       : Data structure for reading parameters (used with LOAD_READPARA)
+//                HDF5_InputTest : Data structure for storing parameters in HDF5 snapshots (used with LOAD_HDF5_OUTPUT)
+//
+// Return      :  None
+//-------------------------------------------------------------------------------------------------------
+void LoadInputTestProb( const LoadParaMode_t load_mode, ReadPara_t *ReadPara, HDF5_Output_t *HDF5_InputTest )
+{
+
+#  ifndef SUPPORT_HDF5
+   if ( load_mode == LOAD_HDF5_OUTPUT )   Aux_Error( ERROR_INFO, "please turn on SUPPORT_HDF5 in the Makefile for load_mode == LOAD_HDF5_OUTPUT !!\n" );
+#  endif
+
+   if ( load_mode == LOAD_READPARA     &&  ReadPara       == NULL )   Aux_Error( ERROR_INFO, "load_mode == LOAD_READPARA and ReadPara == NULL !!\n" );
+   if ( load_mode == LOAD_HDF5_OUTPUT  &&  HDF5_InputTest == NULL )   Aux_Error( ERROR_INFO, "load_mode == LOAD_HDF5_OUTPUT and HDF5_InputTest == NULL !!\n" );
+
+// add parameters in the following format:
+// --> note that VARIABLE, DEFAULT, MIN, and MAX must have the same data type
+// --> some handy constants (e.g., NoMin_int, Eps_float, ...) are defined in "include/ReadPara.h"
+// --> LOAD_PARA() is defined in "include/TestProb.h"
+// ***************************************************************************************************************************
+// LOAD_PARA( load_mode, "KEY_IN_THE_FILE",      &VARIABLE,              DEFAULT,       MIN,              MAX               );
+// ***************************************************************************************************************************
+   LOAD_PARA( load_mode, "BarredPot_V0",         &BarredPot_V0,          200.,          Eps_double,       NoMax_double      );
+   LOAD_PARA( load_mode, "BarredPot_q" ,         &BarredPot_q ,          0.9 ,          Eps_double,       NoMax_double      );
+   LOAD_PARA( load_mode, "BarredPot_Rc",         &BarredPot_Rc,          0.05,          Eps_double,       NoMax_double      );
+   LOAD_PARA( load_mode, "BarredPot_Omegabar",   &BarredPot_Omegabar,    40. ,          Eps_double,       NoMax_double      );
+   LOAD_PARA( load_mode, "BarredPot_fullBS"  ,   &BarredPot_fullBS,      0.1 ,          Eps_double,       NoMax_double      );
+   LOAD_PARA( load_mode, "BarredPot_initT"   ,   &BarredPot_initT,       1.0e4,         Eps_double,       NoMax_double      );
+
+} // FUNCTION : LoadInputTestProb
+
+
+
+//-------------------------------------------------------------------------------------------------------
 // Function    :  SetParameter
 // Description :  Load and set the problem-specific runtime parameters
 //
@@ -115,21 +164,12 @@ void SetParameter()
 
 
 // (1) load the problem-specific runtime parameters
+// (1-1) read parameters from Input__TestProb
    const char FileName[] = "Input__TestProb";
    ReadPara_t *ReadPara  = new ReadPara_t;
 
-// (1-1) add parameters in the following format:
-// --> note that VARIABLE, DEFAULT, MIN, and MAX must have the same data type
-// --> some handy constants (e.g., Useless_bool, Eps_double, NoMin_int, ...) are defined in "include/ReadPara.h"
-// ********************************************************************************************************************************
-// ReadPara->Add( "KEY_IN_THE_FILE",      &VARIABLE,              DEFAULT,       MIN,              MAX               );
-// ********************************************************************************************************************************
-   ReadPara->Add( "BarredPot_V0",         &BarredPot_V0,          200.,          Eps_double,       NoMax_double      );
-   ReadPara->Add( "BarredPot_q" ,         &BarredPot_q ,          0.9 ,          Eps_double,       NoMax_double      );
-   ReadPara->Add( "BarredPot_Rc",         &BarredPot_Rc,          0.05,          Eps_double,       NoMax_double      );
-   ReadPara->Add( "BarredPot_Omegabar",   &BarredPot_Omegabar,    40. ,          Eps_double,       NoMax_double      );
-   ReadPara->Add( "BarredPot_fullBS"  ,   &BarredPot_fullBS,      0.1 ,          Eps_double,       NoMax_double      );
-   ReadPara->Add( "BarredPot_initT"   ,   &BarredPot_initT,       1.0e4,         Eps_double,       NoMax_double      );
+   LoadInputTestProb( LOAD_READPARA, ReadPara, NULL );
+
    ReadPara->Read( FileName );
 
    delete ReadPara;
@@ -167,14 +207,13 @@ void SetParameter()
 // (4) make a note
    if ( MPI_Rank == 0 )
    {
-      Aux_Message( stdout, "==================================================================================\n" );
-      Aux_Message( stdout, "  test problem ID               = %d\n",              TESTPROB_ID                     );
-      Aux_Message( stdout, "  Log bar velocity              = %13.7e km/s \n",    BarredPot_V0*UNIT_V/Const_km    );
-      Aux_Message( stdout, "  Log bar axis ratio            = %13.7e \n",         BarredPot_q                     );
-      Aux_Message( stdout, "  Log bar pattern speed         = %13.7e km/s/kpc\n", BarredPot_Omegabar/UNIT_T
-                                                                                              *Const_kpc/Const_km );
-      Aux_Message( stdout, "  Initial Gas disk temperature  = %13.7e K \n",       BarredPot_initT                 );
-      Aux_Message( stdout, "==================================================================================\n" );
+      Aux_Message( stdout, "==================================================================================\n"             );
+      Aux_Message( stdout, "  test problem ID              = %d\n",              TESTPROB_ID                                  );
+      Aux_Message( stdout, "  Log bar velocity             = %13.7e km/s\n",     BarredPot_V0*UNIT_V/Const_km                 );
+      Aux_Message( stdout, "  Log bar axis ratio           = %13.7e\n",          BarredPot_q                                  );
+      Aux_Message( stdout, "  Log bar pattern speed        = %13.7e km/s/kpc\n", BarredPot_Omegabar/UNIT_T*Const_kpc/Const_km );
+      Aux_Message( stdout, "  Initial Gas disk temperature = %13.7e K\n",        BarredPot_initT                              );
+      Aux_Message( stdout, "==================================================================================\n"             );
    }
 
 
@@ -285,46 +324,23 @@ void SetGridIC( real fluid[], const double x, const double y, const double z, co
 
 
 
-#ifdef SUPPORT_HDF5
-//-------------------------------------------------------------------------------------------------------
-// Function    :  Output_HDF5_TestProb
-// Description :  Store the problem specific parameter in HDF5 outputs (Data_*)
-//
-// Note         : 1. This function only works in MPI_RANK == 0
-//                2. We supports int, uint, long, ulong, bool, float, double, and string datatype
-//                3. There MUST be more than one parameter to be stored
-//                4. The pointer of the data MUST still exist outside the function, e.g. global variables
-//
-// Parameter   :  HDF5_InputTest : the structure storing the parameters
-//
-// Return      :  None
-//-------------------------------------------------------------------------------------------------------
-void Output_HDF5_TestProb( HDF5_Output_t *HDF5_InputTest )
-{
-
-   HDF5_InputTest->Add( "BarredPot_V0",       &BarredPot_V0       );
-   HDF5_InputTest->Add( "BarredPot_q",        &BarredPot_q        );
-   HDF5_InputTest->Add( "BarredPot_Rc",       &BarredPot_Rc       );
-   HDF5_InputTest->Add( "BarredPot_Omegabar", &BarredPot_Omegabar );
-   HDF5_InputTest->Add( "BarredPot_fullBS",   &BarredPot_fullBS   );
-   HDF5_InputTest->Add( "BarredPot_initT",    &BarredPot_initT    );
-
-} // FUNCTION : Output_HDF5_TestProb
-#endif // #ifdef SUPPORT_HDF5
-
-
-
 //-------------------------------------------------------------------------------------------------------
 // Function    :  IsolatedBC
 // Description :  Isolated boundary condition for galaxies, only allow outflow velocities
 //
 // Note        :  1. Linked to the function pointer "BC_User_Ptr"
 //
-// Parameter   :  fluid    : Fluid field to be set
-//                x/y/z    : Physical coordinates
-//                Time     : Physical time
-//                lv       : Refinement level
-//                AuxArray : Auxiliary array
+// Parameter   :  Array          : Array to store the prepared data including ghost zones
+//                ArraySize      : Size of Array including the ghost zones on each side
+//                fluid          : Fluid fields to be set
+//                NVar_Flu       : Number of fluid variables to be prepared
+//                GhostSize      : Number of ghost zones
+//                idx            : Array indices
+//                pos            : Physical coordinates
+//                Time           : Physical time
+//                lv             : Refinement level
+//                TFluVarIdxList : List recording the target fluid variable indices ( = [0 ... NCOMP_TOTAL-1] )
+//                AuxArray       : Auxiliary array
 //
 // Return      :  fluid
 //-------------------------------------------------------------------------------------------------------
@@ -333,6 +349,7 @@ void IsolatedBC( real Array[], const int ArraySize[], real fluid[], const int NV
                  const int lv, const int TFluVarIdxList[], double AuxArray[] )
 {
 
+// simply call the IC function
    SetGridIC( fluid, pos[0], pos[1], pos[2], Time, lv, AuxArray );
 
 } // FUNCTION : IsolatedBC
@@ -359,7 +376,7 @@ void AddNewField_BarredPot()
 // --> since Grackle may already add this field automatically when GRACKLE_METAL is enabled
 // --> also note that "Idx_Metal" has been predefined in Field.h
    if ( Idx_Metal == Idx_Undefined )
-      Idx_Metal = AddField( "Metal", FIXUP_FLUX_YES, FIXUP_REST_YES, NORMALIZE_NO, INTERP_FRAC_YES );
+      Idx_Metal = AddField( "Metal", FIXUP_FLUX_YES, FIXUP_REST_YES, FLOOR_YES, NORMALIZE_NO, INTERP_FRAC_YES );
 
 
 } // FUNCTION : AddNewField_BarredPot
@@ -384,8 +401,8 @@ void AddNewParticleAttribute_BarredPot()
 {
 
 // "Idx_ParMetalFrac" has been predefined in Field.h
-    if ( Idx_ParMetalFrac == Idx_Undefined )
-          Idx_ParMetalFrac = AddParticleAttribute( "ParMetalFrac" );
+   if ( Idx_ParMetalFrac == Idx_Undefined )
+      Idx_ParMetalFrac = AddParticleAttributeFlt( "ParMetalFrac" );
 
 } // FUNCTION : AddNewParticleAttribute_BarredPot
 #endif
@@ -430,7 +447,7 @@ void Init_TestProb_Hydro_BarredPot()
    Init_ExtPot_Ptr             = Init_ExtPot_TabularP17;
 #  endif // #ifdef GRAVITY
 #  ifdef SUPPORT_HDF5
-   Output_HDF5_TestProb_Ptr    = Output_HDF5_TestProb;
+   Output_HDF5_InputTest_Ptr   = LoadInputTestProb;
 #  endif
 #  endif // #if ( MODEL == HYDRO )
 

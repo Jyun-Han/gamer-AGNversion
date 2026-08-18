@@ -14,7 +14,7 @@ typedef void (*SrcFunc_t)( real fluid[], const real B[],
                            const SrcTerms_t *SrcTerms, const real dt, const real dh,
                            const double x, const double y, const double z,
                            const double TimeNew, const double TimeOld,
-                           const real MinDens, const real MinPres, const real MinEint,
+                           const real MinDens, const real MinPres, const real MinEint, const long PassiveFloor,
                            const EoS_t *EoS, const double AuxArray_Flt[], const int AuxArray_Int[] );
 
 
@@ -40,6 +40,8 @@ typedef void (*SrcFunc_t)( real fluid[], const real B[],
 //                                            --> For GPU, Dlep_Profile_DataDevPtr[]/RadiusDevPtr[] store the
 //                                                addresses of global memory arrays, which should NOT be used by host
 //                Dlep_Profile_NBin         : Number of radial bins in Dlep_Profile_*
+//                EC_dtCoef                 : Safety factor of the cooling time-step
+//                EC_TCoolInit              : Flag for checking whether the fluid[TCOOL] field has been initialized
 //
 // Method      :  None --> It seems that CUDA does not support functions in a struct
 //-------------------------------------------------------------------------------------------------------
@@ -78,8 +80,8 @@ struct SrcTerms_t
    int       Dlep_Profile_NBin;
 #  endif
 
-// ExactCooling
-#  if ( MODEL == HYDRO )
+// exact cooling
+#  ifdef EXACT_COOLING
    SrcFunc_t EC_FuncPtr;
    SrcFunc_t EC_CPUPtr;
 #  ifdef GPU
@@ -91,8 +93,8 @@ struct SrcTerms_t
    double   *EC_TEF_lambda_DevPtr;
    double   *EC_TEF_alpha_DevPtr;
    double   *EC_TEFc_DevPtr;
-   bool      EC_subcycling;
    double    EC_dtCoef;
+   bool      EC_TCoolInit[NLEVEL];
 #  endif
 
 // user-specified source term
