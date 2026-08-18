@@ -7,7 +7,7 @@
 
 //-------------------------------------------------------------------------------------------------------
 // Function    :  Mis_GetTimeStep_ExactCooling
-// Description :  Estimate the evolution time-step constrained by the ExactCooling source term
+// Description :  Estimate the evolution time-step constrained by the exact-cooling source term
 //
 // Note        :  1. This function should be applied to both physical and comoving coordinates and always
 //                   return the evolution time-step (dt) actually used in various solvers
@@ -15,9 +15,8 @@
 //                       Comoving coordinates : dt = delta(scale_factor) / ( Hubble_parameter*scale_factor^3 )
 //                   --> We convert dt back to the physical time interval, which equals "delta(scale_factor)"
 //                       in the comoving coordinates, in Mis_GetTimeStep()
-//                2. Invoked by Mis_GetTimeStep() using the function pointer "Mis_GetTimeStep_User_Ptr",
-//                   which must be set by a test problem initializer
-//                3. Enabled by the runtime option "OPT__DT_USER"
+//                2. Invoked by Mis_GetTimeStep()
+//                3. Enabled by setting the runtime option SRC_EC_DTCOEF >= 0.0
 //
 // Parameter   :  lv       : Target refinement level
 //                dTime_dt : dTime/dt (== 1.0 if COMOVING is off)
@@ -29,6 +28,8 @@ double Mis_GetTimeStep_ExactCooling( const int lv, const double dTime_dt )
 
    if ( !SrcTerms.ExactCooling )   return HUGE_NUMBER;
 
+
+   const double dh = amr->dh[lv];
 
 // allocate memory for per-thread arrays
 #  ifdef OPENMP
@@ -50,9 +51,7 @@ double Mis_GetTimeStep_ExactCooling( const int lv, const double dTime_dt )
 #     endif
 
 //    initialize the array
-      OMP_dt_EC[TID] = __DBL_MAX__;
-
-      const double dh = amr->dh[lv];
+      OMP_dt_EC[TID] = HUGE_NUMBER;
 
 #     pragma omp for schedule( static )
       for (int PID=0; PID<amr->NPatchComma[lv][1]; PID++)
@@ -60,13 +59,6 @@ double Mis_GetTimeStep_ExactCooling( const int lv, const double dTime_dt )
          for (int k=0; k<PS1; k++)  {
          for (int j=0; j<PS1; j++)  {
          for (int i=0; i<PS1; i++)  {
-
-#           ifdef MHD
-            real B[NCOMP_MAG];
-            MHD_GetCellCenteredBFieldInPatch( B, lv, PID, i, j, k, amr->MagSg[lv] );
-#           else
-            real *B    = NULL;
-#           endif // ifdef MHD ... else ...
 
             real tcool_Code = NULL_REAL;
 
@@ -76,16 +68,28 @@ double Mis_GetTimeStep_ExactCooling( const int lv, const double dTime_dt )
                tcool_Code = amr->patch[ amr->FluSg[lv] ][lv][PID]->fluid[TCOOL][k][j][i];
 #              endif
             }
+
             else
             {
+#              ifdef MHD
+               real B[NCOMP_MAG];
+               MHD_GetCellCenteredBFieldInPatch( B, lv, PID, i, j, k, amr->MagSg[lv] );
+#              else
+               real *B = NULL;
+#              endif
+
 //             call Src_ExactCooling() to compute the cooling time if not initialized yet
-               const double z = amr->patch[0][lv][PID]->EdgeL[2] + (k+0.5)*dh;
-               const double y = amr->patch[0][lv][PID]->EdgeL[1] + (j+0.5)*dh;
                const double x = amr->patch[0][lv][PID]->EdgeL[0] + (i+0.5)*dh;
+               const double y = amr->patch[0][lv][PID]->EdgeL[1] + (j+0.5)*dh;
+               const double z = amr->patch[0][lv][PID]->EdgeL[2] + (k+0.5)*dh;
 
 //             get the input arrays
                real fluid[FLU_NIN_S];
                for (int v=0; v<FLU_NIN_S; v++)  fluid[v] = amr->patch[ amr->FluSg[lv] ][lv][PID]->fluid[v][k][j][i];
+
+//             call the CPU version of the exact-cooling function
+//             --> must set dt=0.0 since we only want to compute the cooling time fluid[TCOOL] without evolving the gas
+//             --> must NOT pass the EoS object since it's only used by the GPU code
                SrcTerms.EC_CPUPtr( fluid, B, &SrcTerms, 0.0, NULL_REAL, x, y, z, NULL_REAL, NULL_REAL,
                                    MIN_DENS, MIN_PRES, MIN_EINT, PassiveFloorMask, NULL,
                                    Src_EC_AuxArray_Flt, Src_EC_AuxArray_Int );
