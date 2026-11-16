@@ -2800,6 +2800,7 @@ void FillIn_InputPara( InputPara_t &InputPara, const int NFieldStored, char Fiel
 #  ifdef EXACT_COOLING
    InputPara.Src_EC_TEF_N            = SrcTerms.EC_TEF_N;
    InputPara.Src_EC_dtCoef           = SrcTerms.EC_dtCoef;
+   InputPara.Src_EC_Metallicity      = SrcTerms.EC_Metallicity;
 #  endif
    InputPara.Src_GPU_NPGroup         = SRC_GPU_NPGROUP;
 
@@ -3909,6 +3910,7 @@ void GetCompound_InputPara( hid_t &H5_TypeID, const int NFieldStored )
 #  ifdef EXACT_COOLING
    H5Tinsert( H5_TypeID, "Src_EC_TEF_N",            HOFFSET(InputPara_t,Src_EC_TEF_N           ), H5T_NATIVE_INT              );
    H5Tinsert( H5_TypeID, "Src_EC_dtCoef",           HOFFSET(InputPara_t,Src_EC_dtCoef          ), H5T_NATIVE_DOUBLE           );
+   H5Tinsert( H5_TypeID, "Src_EC_Metallicity",      HOFFSET(InputPara_t,Src_EC_Metallicity     ), H5T_NATIVE_DOUBLE           );
 #  endif
 
 // Grackle

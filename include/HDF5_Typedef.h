@@ -707,6 +707,7 @@ struct InputPara_t
 #  ifdef EXACT_COOLING
    int    Src_EC_TEF_N;
    double Src_EC_dtCoef;
+   double Src_EC_Metallicity;
 #  endif
 
 // Grackle

@@ -1150,6 +1150,7 @@ void Aux_TakeNote()
       if ( SrcTerms.ExactCooling ) {
       fprintf( Note, "SRC_EC_TEF_N                   % d\n",      SrcTerms.EC_TEF_N         );
       fprintf( Note, "SRC_EC_DTCOEF                  % 14.7e\n",  SrcTerms.EC_dtCoef        ); }
+      fprintf( Note, "SRC_EC_METALLICITY             % 14.7e\n",  SrcTerms.EC_Metallicity    );
 #     endif
       fprintf( Note, "SRC_USER                       % d\n",      SrcTerms.User             );
       fprintf( Note, "SRC_GPU_NPGROUP                % d\n",      SRC_GPU_NPGROUP           );

@@ -2287,6 +2287,7 @@ void Check_InputPara( const char *FileName, const int FormatVersion )
 #  ifdef EXACT_COOLING
    LoadField( "Src_EC_TEF_N",            &RS.Src_EC_TEF_N,            SID, TID, NonFatal, &RT.Src_EC_TEF_N,             1, NonFatal );
    LoadField( "Src_EC_dtCoef",           &RS.Src_EC_dtCoef,           SID, TID, NonFatal, &RT.Src_EC_dtCoef,            1, NonFatal );
+   LoadField( "Src_EC_Metallicity",      &RS.Src_EC_Metallicity,      SID, TID, NonFatal, &RT.Src_EC_Metallicity,       1, NonFatal );
 #  endif
 
 // Grackle

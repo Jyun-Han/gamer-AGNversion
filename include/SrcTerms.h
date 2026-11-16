@@ -90,6 +90,7 @@ struct SrcTerms_t
    double   *EC_AuxArrayDevPtr_Flt;
    int      *EC_AuxArrayDevPtr_Int;
    int       EC_TEF_N;
+   double    EC_Metallicity;   // normalized metallicity in units of Z_sun for exact cooling
    double   *EC_TEF_lambda_DevPtr;
    double   *EC_TEF_alpha_DevPtr;
    double   *EC_TEFc_DevPtr;

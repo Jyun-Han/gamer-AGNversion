@@ -99,7 +99,8 @@ void Src_SetAuxArray_ExactCooling( double AuxArray_Flt[], int AuxArray_Int[] )
    const double TEF_Tmin     = MIN_TEMP;                                         // MIN temperature
    const double TEF_dltemp   = (log10(TEF_TN) - log10(TEF_Tmin))/TEF_int;        // sampling resolution (Kelvin), LOG!
    const double cl_X         = 0.7;                                              // mass-fraction of hydrogen
-   const double cl_Z         = 0.018;                                            // metallicity (in Zsun)
+   const double cl_Z         = 0.018;                                            // metallicity (0.018 is 1 Zsun)
+   const double cl_Z_solar   = SrcTerms.EC_Metallicity;                          // normalized metallicity in units of Z_sun (runtime parameter)
    const double cl_mol       = 1.0/( 2.0*cl_X + 0.75*(1.0-cl_X-cl_Z)+cl_Z*0.5 ); // mean (total)  molecular weight
    const double cl_mole      = 2.0/(1.0+cl_X);                                   // mean electron molecular weight
    const double cl_moli      = 1.0/cl_X;                                         // mean proton   molecular weight
@@ -115,7 +116,7 @@ void Src_SetAuxArray_ExactCooling( double AuxArray_Flt[], int AuxArray_Int[] )
    AuxArray_Flt[1] = TEF_TN;
    AuxArray_Flt[2] = TEF_Tmin;
    AuxArray_Flt[3] = TEF_dltemp;
-   AuxArray_Flt[4] = cl_Z;
+   AuxArray_Flt[4] = cl_Z_solar;
    AuxArray_Flt[5] = cl_moli_mole;
    AuxArray_Flt[6] = cl_mol;
    AuxArray_Flt[7] = MU_NORM / UNIT_M;                         // mp: proton mass
@@ -617,15 +618,17 @@ void Src_Init_ExactCooling()
    const double TEF_TN       = Src_EC_AuxArray_Flt[1];   // == Tref, must be high enough, but affects sampling resolution
    const double TEF_Tmin     = Src_EC_AuxArray_Flt[2];   // MIN temperature
    const double TEF_dltemp   = Src_EC_AuxArray_Flt[3];   // sampling resolution (Kelvin), LOG!
-   const double cl_Z         = Src_EC_AuxArray_Flt[4];   // metallicity (in Zsun)
+   const double cl_Z_solar   = Src_EC_AuxArray_Flt[4];   // normalized metallicity (in Z_sun)
    const double cl_moli_mole = Src_EC_AuxArray_Flt[5];
    const double cl_mol       = Src_EC_AuxArray_Flt[6];   // mean (total) molecular weights
    const double cl_mp        = Src_EC_AuxArray_Flt[7];   // proton mass
    const double cl_kB_mp     = Src_EC_AuxArray_Flt[8];   // kB*mp
 
    double emis, LAMBDAT, Ti, Tip1;
+
+
 // k = TEF_N-1
-   Cool_fct( 1.0, TEF_TN, &emis, &LAMBDAT, cl_Z, cl_moli_mole, cl_mp );
+   Cool_fct( 1.0, TEF_TN, &emis, &LAMBDAT, cl_Z_solar, cl_moli_mole, cl_mp ); // Cool_fct( 1.0, TEF_TN, &emis, &LAMBDAT, cl_Z, cl_moli_mole, cl_mp );
    h_SrcEC_TEF_lambda[TEF_N-1] = LAMBDAT * cl_mol / cl_moli_mole / cl_kB_mp;
    h_SrcEC_TEF_alpha [TEF_N-1] = 0.0;  // is never required
 
@@ -634,7 +637,7 @@ void Src_Init_ExactCooling()
    {
       Ti   = pow( 10.0, log10(TEF_Tmin) + i*TEF_dltemp );
       Tip1 = pow( 10.0, log10(TEF_Tmin) + (i+1)*TEF_dltemp );
-      Cool_fct( 1.0, Ti, &emis, &LAMBDAT, cl_Z, cl_moli_mole, cl_mp );
+      Cool_fct( 1.0, Ti, &emis, &LAMBDAT, cl_Z_solar, cl_moli_mole, cl_mp ); // Cool_fct( 1.0, Ti, &emis, &LAMBDAT, cl_Z, cl_moli_mole, cl_mp );
       h_SrcEC_TEF_lambda[i] = LAMBDAT * cl_mol / cl_moli_mole / cl_kB_mp;
 #     ifdef GAMER_DEBUG
       if ( h_SrcEC_TEF_lambda[i] <= 0.0 )

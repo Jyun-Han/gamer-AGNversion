@@ -247,6 +247,7 @@ void Init_Load_Parameter()
 #  ifdef EXACT_COOLING
    ReadPara->Add( "SRC_EC_TEF_N",               &SrcTerms.EC_TEF_N,               1501,            1,             NoMax_int      );
    ReadPara->Add( "SRC_EC_DTCOEF",              &SrcTerms.EC_dtCoef,             -1.0,             NoMin_double,  NoMax_double   );
+   ReadPara->Add( "SRC_EC_METALLICITY",         &SrcTerms.EC_Metallicity,         1.0,             0.0,           NoMax_double   );
 #  endif
    ReadPara->Add( "SRC_USER",                   &SrcTerms.User,                   false,           Useless_bool,  Useless_bool   );
 // do not check SRC_GPU_NPGROUP since it may be reset by either Init_ResetParameter() or CUAPI_SetMemSize()
